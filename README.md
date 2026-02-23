@@ -16,36 +16,40 @@ This Terraform module deploys a production-ready Keycloak instance on AWS using 
 
 ## Architecture Overview
 
-```
-                                    ┌─────────────────────────────────────────────────────┐
-                                    │                        VPC                          │
-                                    │  ┌─────────────────────────────────────────────┐   │
-       ┌──────────┐                 │  │              Public Subnets                 │   │
-       │  Users   │                 │  │                                             │   │
-       └────┬─────┘                 │  │  ┌─────────────────────────────────────┐   │   │
-            │                       │  │  │     Application Load Balancer       │   │   │
-            │ HTTPS                 │  │  │         (HTTPS: 443)                 │   │   │
-            ▼                       │  │  └──────────────────┬──────────────────┘   │   │
-    ┌───────────────┐               │  │                     │                       │   │
-    │   Route53     │               │  │                     ▼                       │   │
-    │  (DNS A Record)│──────────────┼──│   ┌─────────────┐     ┌─────────────┐      │   │
-    └───────────────┘               │  │   │  Keycloak   │     │  Keycloak   │      │   │
-                                    │  │   │  (Fargate)  │◄───►│  (Fargate)  │      │   │
-                                    │  │   │   Task 1    │     │   Task 2    │      │   │
-                                    │  │   └─────────────┘     └─────────────┘      │   │
-                                    │  │                                             │   │
-                                    │  └─────────────────────────────────────────────┘   │
-                                    │  ┌─────────────────────────────────────────────┐   │
-                                    │  │              Private Subnets                │   │
-                                    │  │                                             │   │
-                                    │  │          ┌─────────────────┐                │   │
-                                    │  │          │  RDS PostgreSQL │                │   │
-                                    │  │          │   (Multi-AZ)    │                │   │
-                                    │  │          └─────────────────┘                │   │
-                                    │  │                                             │   │
-                                    │  └─────────────────────────────────────────────┘   │
-                                    │                                                     │
-                                    └─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    Users([Users])
+
+    Users -->|HTTPS| Route53[Route53 DNS]
+    Route53 --> ALB
+
+    subgraph VPC[VPC]
+        subgraph PublicSubnets[Public Subnets]
+            ALB[Application Load Balancer<br/>HTTPS :443]
+            ECS1[Keycloak<br/>Fargate Task 1]
+            ECS2[Keycloak<br/>Fargate Task 2]
+        end
+
+        subgraph PrivateSubnets[Private Subnets]
+            RDS[(RDS PostgreSQL<br/>Multi-AZ)]
+        end
+
+        ALB --> ECS1
+        ALB --> ECS2
+        ECS1 <-->|Cluster| ECS2
+        ECS1 --> RDS
+        ECS2 --> RDS
+    end
+
+    subgraph AWS Services
+        SecretsManager[Secrets Manager]
+        CloudWatch[CloudWatch Logs]
+        ACM[ACM Certificate]
+    end
+
+    ECS1 -.-> SecretsManager
+    ECS1 -.-> CloudWatch
+    ALB -.-> ACM
 ```
 
 ## Prerequisites
@@ -55,121 +59,123 @@ Before using this module, ensure you have:
 1. **Terraform >= 1.9.8** installed
 2. **AWS CLI** configured with appropriate credentials
 3. **AWS Account** with permissions to create:
-   - VPC, Subnets, Security Groups
-   - ECS Cluster, Services, Task Definitions
-   - RDS PostgreSQL instances
-   - Application Load Balancer
-   - ACM Certificates
-   - Route53 records
-   - IAM Roles and Policies
-   - Secrets Manager secrets
-   - CloudWatch Log Groups
+
+- VPC, Subnets, Security Groups
+- ECS Cluster, Services, Task Definitions
+- RDS PostgreSQL instances
+- Application Load Balancer
+- ACM Certificates
+- Route53 records
+- IAM Roles and Policies
+- Secrets Manager secrets
+- CloudWatch Log Groups
 
 4. **Route53 Hosted Zone** for your domain (for DNS validation and record creation)
 
 ## Required Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `project_name` | Name prefix for all resources | `"myapp"` |
-| `domain_name` | Domain name for Keycloak | `"auth.example.com"` |
-| `route53_zone_id` | Route53 hosted zone ID | `"Z1234567890ABC"` |
+| Variable          | Description                   | Example              |
+| ----------------- | ----------------------------- | -------------------- |
+| `project_name`    | Name prefix for all resources | `"myapp"`            |
+| `domain_name`     | Domain name for Keycloak      | `"auth.example.com"` |
+| `route53_zone_id` | Route53 hosted zone ID        | `"Z1234567890ABC"`   |
 
 ## Optional Variables
 
 ### General Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `tags` | Tags to apply to all resources | `{}` |
+| Variable | Description                    | Default |
+| -------- | ------------------------------ | ------- |
+| `tags`   | Tags to apply to all resources | `{}`    |
 
 ### VPC Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `vpc_cidr` | CIDR block for the VPC | `"10.0.0.0/16"` |
-| `vpc_public_subnet_cidrs` | CIDR blocks for public subnets | `["10.0.1.0/24", "10.0.2.0/24"]` |
-| `vpc_private_subnet_cidrs` | CIDR blocks for private subnets | `["10.0.10.0/24", "10.0.11.0/24"]` |
-| `vpc_availability_zones` | Availability zones (auto-detected if empty) | `[]` |
-| `vpc_enable_flow_logs` | Enable VPC flow logs | `false` |
-| `vpc_flow_logs_retention_days` | Flow logs retention period | `14` |
+| Variable                       | Description                                 | Default                            |
+| ------------------------------ | ------------------------------------------- | ---------------------------------- |
+| `vpc_cidr`                     | CIDR block for the VPC                      | `"10.0.0.0/16"`                    |
+| `vpc_public_subnet_cidrs`      | CIDR blocks for public subnets              | `["10.0.1.0/24", "10.0.2.0/24"]`   |
+| `vpc_private_subnet_cidrs`     | CIDR blocks for private subnets             | `["10.0.10.0/24", "10.0.11.0/24"]` |
+| `vpc_availability_zones`       | Availability zones (auto-detected if empty) | `[]`                               |
+| `vpc_enable_flow_logs`         | Enable VPC flow logs                        | `false`                            |
+| `vpc_flow_logs_retention_days` | Flow logs retention period                  | `14`                               |
 
 ### ALB Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `alb_internal` | Whether ALB is internal | `false` |
-| `alb_idle_timeout` | Connection idle timeout (seconds) | `60` |
-| `alb_access_logs_enabled` | Enable ALB access logs | `false` |
-| `alb_ssl_policy` | SSL policy for HTTPS listener | `"ELBSecurityPolicy-TLS13-1-2-2021-06"` |
+| Variable                  | Description                       | Default                                 |
+| ------------------------- | --------------------------------- | --------------------------------------- |
+| `alb_internal`            | Whether ALB is internal           | `false`                                 |
+| `alb_idle_timeout`        | Connection idle timeout (seconds) | `60`                                    |
+| `alb_access_logs_enabled` | Enable ALB access logs            | `false`                                 |
+| `alb_ssl_policy`          | SSL policy for HTTPS listener     | `"ELBSecurityPolicy-TLS13-1-2-2021-06"` |
 
 ### Keycloak Task Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `keycloak_image` | Docker image for Keycloak | `"quay.io/keycloak/keycloak:26.0.6"` |
-| `keycloak_cross_account_ecr_repository_arn` | ECR repository ARN from another account | `""` |
-| `keycloak_task_cpu` | CPU units (1024 = 1 vCPU) | `1024` |
-| `keycloak_task_memory` | Memory in MB | `2048` |
-| `keycloak_desired_count` | Desired number of tasks | `2` |
-| `keycloak_min_capacity` | Minimum tasks for auto-scaling | `2` |
-| `keycloak_max_capacity` | Maximum tasks for auto-scaling | `10` |
-| `keycloak_autoscaling_cpu_target` | CPU target for auto-scaling (%) | `70` |
-| `keycloak_autoscaling_memory_target` | Memory target for auto-scaling (%) | `80` |
+| Variable                                    | Description                             | Default                              |
+| ------------------------------------------- | --------------------------------------- | ------------------------------------ |
+| `keycloak_image`                            | Docker image for Keycloak               | `"quay.io/keycloak/keycloak:26.0.6"` |
+| `keycloak_cross_account_ecr_repository_arn` | ECR repository ARN from another account | `""`                                 |
+| `keycloak_task_cpu`                         | CPU units (1024 = 1 vCPU)               | `1024`                               |
+| `keycloak_task_memory`                      | Memory in MB                            | `2048`                               |
+| `keycloak_desired_count`                    | Desired number of tasks                 | `2`                                  |
+| `keycloak_min_capacity`                     | Minimum tasks for auto-scaling          | `2`                                  |
+| `keycloak_max_capacity`                     | Maximum tasks for auto-scaling          | `10`                                 |
+| `keycloak_autoscaling_cpu_target`           | CPU target for auto-scaling (%)         | `70`                                 |
+| `keycloak_autoscaling_memory_target`        | Memory target for auto-scaling (%)      | `80`                                 |
 
 ### Keycloak Application Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `keycloak_admin_username` | Admin username | `"admin"` |
-| `keycloak_admin_password` | Admin password (auto-generated if empty) | `""` |
-| `keycloak_hostname_strict` | Enable strict hostname checking | `true` |
-| `keycloak_log_level` | Log level | `"INFO"` |
-| `keycloak_additional_env_vars` | Additional environment variables | `[]` |
-| `keycloak_additional_secrets` | Additional secrets from Secrets Manager | `[]` |
+| Variable                       | Description                              | Default   |
+| ------------------------------ | ---------------------------------------- | --------- |
+| `keycloak_admin_username`      | Admin username                           | `"admin"` |
+| `keycloak_admin_password`      | Admin password (auto-generated if empty) | `""`      |
+| `keycloak_hostname_strict`     | Enable strict hostname checking          | `true`    |
+| `keycloak_log_level`           | Log level                                | `"INFO"`  |
+| `keycloak_additional_env_vars` | Additional environment variables         | `[]`      |
+| `keycloak_additional_secrets`  | Additional secrets from Secrets Manager  | `[]`      |
 
 > **Note**: Build-time settings like `KC_DB`, `KC_CACHE`, `KC_HEALTH_ENABLED`, `KC_METRICS_ENABLED`, and `KC_FEATURES` should be configured in your Dockerfile, not as runtime variables. See the [Keycloak Image](#keycloak-image) section.
 
 ### RDS Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `rds_engine_version` | PostgreSQL engine version | `"16.4"` |
-| `rds_instance_class` | RDS instance class | `"db.t3.micro"` |
-| `rds_allocated_storage` | Allocated storage in GB | `20` |
-| `rds_max_allocated_storage` | Max storage for autoscaling (0 to disable) | `100` |
-| `rds_database_name` | Database name | `"keycloak"` |
-| `rds_username` | Master username | `"keycloak"` |
-| `rds_multi_az` | Enable Multi-AZ deployment | `false` |
-| `rds_backup_retention_period` | Backup retention in days | `7` |
-| `rds_deletion_protection` | Enable deletion protection | `false` |
-| `rds_storage_encrypted` | Enable storage encryption | `true` |
-| `rds_performance_insights_enabled` | Enable Performance Insights | `false` |
+| Variable                           | Description                                | Default         |
+| ---------------------------------- | ------------------------------------------ | --------------- |
+| `rds_engine_version`               | PostgreSQL engine version                  | `"16.4"`        |
+| `rds_instance_class`               | RDS instance class                         | `"db.t3.micro"` |
+| `rds_allocated_storage`            | Allocated storage in GB                    | `20`            |
+| `rds_max_allocated_storage`        | Max storage for autoscaling (0 to disable) | `100`           |
+| `rds_database_name`                | Database name                              | `"keycloak"`    |
+| `rds_username`                     | Master username                            | `"keycloak"`    |
+| `rds_multi_az`                     | Enable Multi-AZ deployment                 | `false`         |
+| `rds_backup_retention_period`      | Backup retention in days                   | `7`             |
+| `rds_deletion_protection`          | Enable deletion protection                 | `false`         |
+| `rds_storage_encrypted`            | Enable storage encryption                  | `true`          |
+| `rds_performance_insights_enabled` | Enable Performance Insights                | `false`         |
 
 ### Bastion Host Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `bastion_enabled` | Enable bastion host | `false` |
-| `bastion_instance_type` | EC2 instance type | `"t3.micro"` |
-| `bastion_allowed_cidr_blocks` | CIDRs allowed to connect | `[]` |
+| Variable                      | Description              | Default      |
+| ----------------------------- | ------------------------ | ------------ |
+| `bastion_enabled`             | Enable bastion host      | `false`      |
+| `bastion_instance_type`       | EC2 instance type        | `"t3.micro"` |
+| `bastion_allowed_cidr_blocks` | CIDRs allowed to connect | `[]`         |
 
 ## Outputs
 
-| Output | Description |
-|--------|-------------|
-| `keycloak_url` | URL for Keycloak |
-| `ecs_cluster_name` | Name of the ECS cluster |
-| `ecs_service_name` | Name of the ECS service |
-| `keycloak_admin_secret_arn` | ARN of Keycloak admin credentials secret |
-| `rds_master_user_secret_arn` | ARN of RDS master credentials secret |
-| `rds_endpoint` | RDS instance endpoint |
-| `cloudwatch_log_group_name` | CloudWatch log group name |
-| `bastion_instance_id` | Bastion instance ID (if enabled) |
+| Output                       | Description                              |
+| ---------------------------- | ---------------------------------------- |
+| `keycloak_url`               | URL for Keycloak                         |
+| `ecs_cluster_name`           | Name of the ECS cluster                  |
+| `ecs_service_name`           | Name of the ECS service                  |
+| `keycloak_admin_secret_arn`  | ARN of Keycloak admin credentials secret |
+| `rds_master_user_secret_arn` | ARN of RDS master credentials secret     |
+| `rds_endpoint`               | RDS instance endpoint                    |
+| `cloudwatch_log_group_name`  | CloudWatch log group name                |
+| `bastion_instance_id`        | Bastion instance ID (if enabled)         |
 
 ## Usage
 
 This module requires two AWS providers:
+
 - `aws` - Primary provider for infrastructure (ECS, RDS, ALB, etc.)
 - `aws.dns` - Provider for Route53 DNS records (can be same or different account)
 
@@ -467,32 +473,32 @@ Understanding when configuration is applied is critical for Keycloak:
 
 These settings are **compiled into the image** during `kc.sh build`. Changing them requires rebuilding the Docker image.
 
-| Variable | Purpose | Why Build-Time? |
-|----------|---------|-----------------|
-| `KC_DB=postgres` | Database type | Only includes PostgreSQL JDBC driver, excludes MySQL/Oracle/etc. Reduces image size. |
-| `KC_HEALTH_ENABLED=true` | Health endpoints | Compiles `/health/*` endpoints into the application |
-| `KC_METRICS_ENABLED=true` | Metrics endpoints | Compiles `/metrics` endpoint into the application |
-| `KC_CACHE=ispn` | Cache provider | Includes Infinispan distributed cache libraries |
-| `KC_CACHE_STACK=tcp` | Clustering transport | Includes TCP-based JGroups stack for JDBC_PING |
-| `KC_FEATURES=...` | Feature flags | Compiles optional features into the application |
+| Variable                  | Purpose              | Why Build-Time?                                                                      |
+| ------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| `KC_DB=postgres`          | Database type        | Only includes PostgreSQL JDBC driver, excludes MySQL/Oracle/etc. Reduces image size. |
+| `KC_HEALTH_ENABLED=true`  | Health endpoints     | Compiles `/health/`\* endpoints into the application                                 |
+| `KC_METRICS_ENABLED=true` | Metrics endpoints    | Compiles `/metrics` endpoint into the application                                    |
+| `KC_CACHE=ispn`           | Cache provider       | Includes Infinispan distributed cache libraries                                      |
+| `KC_CACHE_STACK=tcp`      | Clustering transport | Includes TCP-based JGroups stack for JDBC_PING                                       |
+| `KC_FEATURES=...`         | Feature flags        | Compiles optional features into the application                                      |
 
 #### Runtime Configuration (ECS Task Definition)
 
 These settings are **read at container startup** and can differ per environment. This module configures these automatically.
 
-| Variable | Purpose | Why Runtime? |
-|----------|---------|--------------|
-| `KC_DB_URL` | Database connection string | Different per environment (dev/staging/prod) |
-| `KC_DB_USERNAME` | Database username | Secret, should not be in image |
-| `KC_DB_PASSWORD` | Database password | Secret, should not be in image |
-| `KC_HOSTNAME` | Public hostname | Different per environment |
-| `KC_HOSTNAME_STRICT` | Hostname validation | May vary by environment |
-| `KC_PROXY_HEADERS` | Proxy mode | Infrastructure-dependent |
-| `KC_HTTP_ENABLED` | Enable HTTP | Required when TLS terminates at ALB |
-| `KC_LOG_LEVEL` | Logging verbosity | May change for debugging without rebuild |
-| `KEYCLOAK_ADMIN` | Initial admin username | Secret, only used on first startup |
-| `KEYCLOAK_ADMIN_PASSWORD` | Initial admin password | Secret, only used on first startup |
-| `JAVA_OPTS_APPEND` | JVM options | Clustering DNS config, memory tuning |
+| Variable                  | Purpose                    | Why Runtime?                                 |
+| ------------------------- | -------------------------- | -------------------------------------------- |
+| `KC_DB_URL`               | Database connection string | Different per environment (dev/staging/prod) |
+| `KC_DB_USERNAME`          | Database username          | Secret, should not be in image               |
+| `KC_DB_PASSWORD`          | Database password          | Secret, should not be in image               |
+| `KC_HOSTNAME`             | Public hostname            | Different per environment                    |
+| `KC_HOSTNAME_STRICT`      | Hostname validation        | May vary by environment                      |
+| `KC_PROXY_HEADERS`        | Proxy mode                 | Infrastructure-dependent                     |
+| `KC_HTTP_ENABLED`         | Enable HTTP                | Required when TLS terminates at ALB          |
+| `KC_LOG_LEVEL`            | Logging verbosity          | May change for debugging without rebuild     |
+| `KEYCLOAK_ADMIN`          | Initial admin username     | Secret, only used on first startup           |
+| `KEYCLOAK_ADMIN_PASSWORD` | Initial admin password     | Secret, only used on first startup           |
+| `JAVA_OPTS_APPEND`        | JVM options                | Clustering DNS config, memory tuning         |
 
 #### What This Module Handles Automatically
 
@@ -567,6 +573,7 @@ terraform apply  # Apply the update
 ### 3. Monitor the Deployment
 
 ECS performs a rolling update:
+
 1. New tasks are launched with the new image
 2. ALB health checks verify new tasks are healthy
 3. Traffic shifts to new tasks
@@ -617,6 +624,7 @@ aws logs tail $(terraform output -raw cloudwatch_log_group_name) --since 5m --fo
 ```
 
 Look for messages like:
+
 ```
 INFO [org.infinispan.CLUSTER] ISPN000094: Received new cluster view: [node1|1] (2) [node1, node2]
 ```
@@ -665,14 +673,14 @@ This module configures Keycloak clustering using JDBC_PING:
 
 Approximate monthly costs (us-east-1, as of 2024):
 
-| Component | Configuration | Estimated Cost |
-|-----------|---------------|----------------|
-| ECS Fargate | 2 tasks × 1 vCPU × 2GB | ~$60 |
-| RDS PostgreSQL | db.t3.micro, 20GB | ~$15 |
-| ALB | 1 ALB + LCU charges | ~$20 |
-| Route53 | Hosted zone + queries | ~$1 |
-| CloudWatch | Logs + Container Insights | ~$10 |
-| **Total** | | **~$105/month** |
+| Component      | Configuration             | Estimated Cost  |
+| -------------- | ------------------------- | --------------- |
+| ECS Fargate    | 2 tasks × 1 vCPU × 2GB    | ~$60            |
+| RDS PostgreSQL | db.t3.micro, 20GB         | ~$15            |
+| ALB            | 1 ALB + LCU charges       | ~$20            |
+| Route53        | Hosted zone + queries     | ~$1             |
+| CloudWatch     | Logs + Container Insights | ~$10            |
+| **Total**      |                           | **~$105/month** |
 
 For production with Multi-AZ RDS and larger instances, expect $250-400/month.
 
@@ -700,16 +708,18 @@ For production with Multi-AZ RDS and larger instances, expect $250-400/month.
 ### ECS Tasks Not Starting
 
 1. Check CloudWatch logs:
-   ```bash
-   aws logs tail $(terraform output -raw cloudwatch_log_group_name) --since 30m
-   ```
+
+```bash
+ aws logs tail $(terraform output -raw cloudwatch_log_group_name) --since 30m
+```
 
 2. Check task stopped reason:
-   ```bash
-   aws ecs describe-tasks \
-     --cluster $(terraform output -raw ecs_cluster_name) \
-     --tasks $(aws ecs list-tasks --cluster $(terraform output -raw ecs_cluster_name) --query 'taskArns[0]' --output text)
-   ```
+
+```bash
+ aws ecs describe-tasks \
+   --cluster $(terraform output -raw ecs_cluster_name) \
+   --tasks $(aws ecs list-tasks --cluster $(terraform output -raw ecs_cluster_name) --query 'taskArns[0]' --output text)
+```
 
 ### Database Connection Issues
 
