@@ -800,7 +800,7 @@ resource "aws_ecs_task_definition" "keycloak" {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = aws_cloudwatch_log_group.keycloak.name
-          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-region"        = data.aws_region.current.id
           "awslogs-stream-prefix" = "keycloak"
         }
       }
@@ -849,7 +849,6 @@ resource "aws_service_discovery_service" "keycloak" {
   }
 
   health_check_custom_config {
-    failure_threshold = 1
   }
 
   tags = local.common_tags
