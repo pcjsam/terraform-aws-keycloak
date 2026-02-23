@@ -141,6 +141,19 @@ Before using this module, ensure you have:
 
 > **Note**: Build-time settings like `KC_DB`, `KC_CACHE`, `KC_HEALTH_ENABLED`, `KC_METRICS_ENABLED`, and `KC_FEATURES` should be configured in your Dockerfile, not as runtime variables. See the [Keycloak Image](#keycloak-image) section.
 
+### Health Check Configuration
+
+| Variable                           | Description                                              | Default          |
+| ---------------------------------- | -------------------------------------------------------- | ---------------- |
+| `health_check_path`                | Path for ALB health checks                               | `"/health/ready"`|
+| `health_check_interval`            | Interval in seconds between health checks                | `30`             |
+| `health_check_timeout`             | Timeout in seconds for health check response             | `10`             |
+| `health_check_healthy_threshold`   | Consecutive successful checks required                   | `2`              |
+| `health_check_unhealthy_threshold` | Consecutive failed checks before marking unhealthy       | `3`              |
+| `health_check_start_period`        | Grace period before health checks start (container init) | `180`            |
+
+> **Note**: Keycloak can take 2-3 minutes to fully initialize, especially on first deployment when database migrations run. The `health_check_start_period` provides a grace period during which failed health checks don't count against the container.
+
 ### RDS Configuration
 
 | Variable                           | Description                                | Default         |
@@ -332,6 +345,9 @@ module "keycloak" {
   # ALB Configuration
   alb_access_logs_enabled = true
 
+  # ECS Configuration
+  ecs_container_insights_enabled = true  # Enhanced observability with task-level metrics
+
   # Keycloak Configuration
   keycloak_image         = "quay.io/keycloak/keycloak:26.0.6"
   keycloak_task_cpu      = 2048
@@ -340,6 +356,10 @@ module "keycloak" {
   keycloak_min_capacity  = 2
   keycloak_max_capacity  = 10
   keycloak_log_level     = "INFO"
+
+  # Health Check Configuration
+  health_check_path         = "/health/ready"
+  health_check_start_period = 180  # 3 minutes grace period for Keycloak startup
 
   # RDS Configuration (Production)
   rds_instance_class               = "db.r6g.large"
@@ -501,6 +521,7 @@ These settings are **read at container startup** and can differ per environment.
 | `KC_HOSTNAME_STRICT`      | Hostname validation        | May vary by environment                      |
 | `KC_PROXY_HEADERS`        | Proxy mode                 | Infrastructure-dependent                     |
 | `KC_HTTP_ENABLED`         | Enable HTTP                | Required when TLS terminates at ALB          |
+| `KC_HTTP_MANAGEMENT_PORT` | Management interface port  | Enables health/metrics endpoints on separate port |
 | `KC_LOG_LEVEL`            | Logging verbosity          | May change for debugging without rebuild     |
 | `KEYCLOAK_ADMIN`          | Initial admin username     | Secret, only used on first startup           |
 | `KEYCLOAK_ADMIN_PASSWORD` | Initial admin password     | Secret, only used on first startup           |
@@ -511,13 +532,14 @@ These settings are **read at container startup** and can differ per environment.
 The ECS task definition in this module automatically configures:
 
 ```
-KC_DB_URL          → jdbc:postgresql://<rds-endpoint>/<database>
-KC_HOSTNAME        → <your-domain-name>
-KC_HOSTNAME_STRICT → true
-KC_PROXY_HEADERS   → xforwarded (for ALB)
-KC_HTTP_ENABLED    → true (ALB terminates TLS)
-KC_LOG_LEVEL       → INFO (configurable via variable)
-JAVA_OPTS_APPEND   → JGroups DNS query for clustering
+KC_DB_URL               → jdbc:postgresql://<rds-endpoint>/<database>
+KC_HOSTNAME             → <your-domain-name>
+KC_HOSTNAME_STRICT      → true
+KC_PROXY_HEADERS        → xforwarded (for ALB)
+KC_HTTP_ENABLED         → true (ALB terminates TLS)
+KC_HTTP_MANAGEMENT_PORT → 9000 (health/metrics endpoint port)
+KC_LOG_LEVEL            → INFO (configurable via variable)
+JAVA_OPTS_APPEND        → JGroups DNS query for clustering
 
 Secrets (from AWS Secrets Manager):
 KC_DB_USERNAME     → RDS master username
@@ -725,6 +747,22 @@ For production with Multi-AZ RDS and larger instances, expect $250-400/month.
  aws ecs describe-tasks \
    --cluster $(terraform output -raw ecs_cluster_name) \
    --tasks $(aws ecs list-tasks --cluster $(terraform output -raw ecs_cluster_name) --query 'taskArns[0]' --output text)
+```
+
+### Health Check Failures
+
+If tasks are being terminated due to health check failures:
+
+1. **Verify the management interface is running** - Health endpoints are served on port 9000 (management port). The module sets `KC_HTTP_MANAGEMENT_PORT=9000` automatically.
+
+2. **Check if Keycloak has finished starting** - Keycloak can take 2-3 minutes to initialize. The `health_check_start_period` (default: 180s) provides a grace period.
+
+3. **Verify your Docker image has health endpoints enabled** - Your Dockerfile must include `KC_HEALTH_ENABLED=true` at build time.
+
+4. **Test the health endpoint manually**:
+```bash
+# From within the container or via ECS Exec
+curl -f http://localhost:9000/health/ready
 ```
 
 ### Database Connection Issues

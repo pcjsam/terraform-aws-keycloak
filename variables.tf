@@ -359,6 +359,17 @@ variable "health_check_unhealthy_threshold" {
   }
 }
 
+variable "health_check_start_period" {
+  description = "Grace period in seconds before health checks start (allows container to initialize)"
+  type        = number
+  default     = 180
+
+  validation {
+    condition     = var.health_check_start_period >= 0 && var.health_check_start_period <= 300
+    error_message = "Health check start period must be between 0 and 300 seconds."
+  }
+}
+
 ############################################
 # RDS Configuration
 ############################################

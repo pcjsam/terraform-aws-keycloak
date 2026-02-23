@@ -768,6 +768,10 @@ resource "aws_ecs_task_definition" "keycloak" {
           value = "true"
         },
         {
+          name  = "KC_HTTP_MANAGEMENT_PORT"
+          value = tostring(var.keycloak_health_port)
+        },
+        {
           name  = "KC_LOG_LEVEL"
           value = var.keycloak_log_level
         },
@@ -807,10 +811,10 @@ resource "aws_ecs_task_definition" "keycloak" {
 
       healthCheck = {
         command     = ["CMD-SHELL", "curl -f http://localhost:${var.keycloak_health_port}/health/ready || exit 1"]
-        interval    = 30
-        timeout     = 10
-        retries     = 3
-        startPeriod = 120
+        interval    = var.health_check_interval
+        timeout     = var.health_check_timeout
+        retries     = var.health_check_unhealthy_threshold
+        startPeriod = var.health_check_start_period
       }
     }
   ])

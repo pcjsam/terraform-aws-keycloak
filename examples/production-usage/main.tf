@@ -67,6 +67,7 @@ module "keycloak" {
   health_check_timeout             = 10
   health_check_healthy_threshold   = 2
   health_check_unhealthy_threshold = 3
+  health_check_start_period        = 180 # 3 minutes grace period for Keycloak startup
 
   # RDS Configuration (production)
   rds_instance_class                 = var.rds_instance_class
