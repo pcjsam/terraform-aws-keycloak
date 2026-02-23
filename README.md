@@ -399,7 +399,7 @@ ENV KC_DB=postgres
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 
-# Clustering: Use Infinispan cache with TCP transport for JDBC_PING discovery
+# Clustering: Use Infinispan cache with TCP transport for DNS_PING discovery
 ENV KC_CACHE=ispn
 ENV KC_CACHE_STACK=tcp
 
@@ -479,7 +479,7 @@ These settings are **compiled into the image** during `kc.sh build`. Changing th
 | `KC_HEALTH_ENABLED=true`  | Health endpoints     | Compiles `/health/`\* endpoints into the application                                 |
 | `KC_METRICS_ENABLED=true` | Metrics endpoints    | Compiles `/metrics` endpoint into the application                                    |
 | `KC_CACHE=ispn`           | Cache provider       | Includes Infinispan distributed cache libraries                                      |
-| `KC_CACHE_STACK=tcp`      | Clustering transport | Includes TCP-based JGroups stack for JDBC_PING                                       |
+| `KC_CACHE_STACK=tcp`      | Clustering transport | Includes TCP-based JGroups stack for DNS_PING                                        |
 | `KC_FEATURES=...`         | Feature flags        | Compiles optional features into the application                                      |
 
 #### Runtime Configuration (ECS Task Definition)
@@ -665,9 +665,9 @@ psql -h localhost -U keycloak -d keycloak
 
 This module configures Keycloak clustering using JDBC_PING:
 
-1. **JDBC_PING**: Keycloak nodes discover each other via the PostgreSQL database
+1. **DNS_PING**: Keycloak nodes discover each other via DNS queries to AWS Cloud Map
 2. **Infinispan**: Distributed cache replicates sessions across all nodes
-3. **Service Discovery**: AWS Cloud Map provides DNS-based discovery as a fallback
+3. **Service Discovery**: AWS Cloud Map automatically registers/deregisters task IPs
 
 ## Cost Estimate
 
