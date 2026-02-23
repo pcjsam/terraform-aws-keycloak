@@ -855,8 +855,6 @@ resource "aws_service_discovery_service" "keycloak" {
   health_check_custom_config {
   }
 
-  force_destroy = true
-
   tags = local.common_tags
 }
 
