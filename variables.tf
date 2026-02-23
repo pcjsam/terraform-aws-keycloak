@@ -136,6 +136,12 @@ variable "route53_zone_id" {
   type        = string
 }
 
+variable "dns_record_ttl" {
+  description = "TTL in seconds for DNS records (used for certificate validation records). Note: The main A record uses an ALIAS which has a fixed 60-second TTL managed by Route53."
+  type        = number
+  default     = 60
+}
+
 ############################################
 # ECS Cluster Configuration
 ############################################
