@@ -10,7 +10,7 @@ This Terraform module deploys a production-ready Keycloak instance on AWS using 
 - **Managed Database**: RDS PostgreSQL with automated backups and optional Multi-AZ
 - **HTTPS Only**: ACM certificate with automatic DNS validation and HTTP-to-HTTPS redirect
 - **Secrets Management**: AWS Secrets Manager for admin and database credentials
-- **Observability**: CloudWatch logs, Container Insights, optional VPC Flow Logs
+- **Observability**: CloudWatch logs, Container Insights with enhanced observability (task-level metrics), optional VPC Flow Logs
 - **Auto-Scaling**: CPU and memory-based scaling policies
 - **Optional Bastion**: SSM-enabled bastion host for database access
 
@@ -107,6 +107,12 @@ Before using this module, ensure you have:
 | `alb_idle_timeout`        | Connection idle timeout (seconds) | `60`                                    |
 | `alb_access_logs_enabled` | Enable ALB access logs            | `false`                                 |
 | `alb_ssl_policy`          | SSL policy for HTTPS listener     | `"ELBSecurityPolicy-TLS13-1-2-2021-06"` |
+
+### ECS Configuration
+
+| Variable                       | Description                                                                        | Default |
+| ------------------------------ | ---------------------------------------------------------------------------------- | ------- |
+| `ecs_container_insights_enabled` | Enable CloudWatch Container Insights with enhanced observability (task-level metrics) | `true`  |
 
 ### Keycloak Task Configuration
 

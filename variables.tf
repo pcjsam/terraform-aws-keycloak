@@ -147,7 +147,7 @@ variable "dns_record_ttl" {
 ############################################
 
 variable "ecs_container_insights_enabled" {
-  description = "Enable CloudWatch Container Insights for ECS cluster"
+  description = "Enable CloudWatch Container Insights with enhanced observability for ECS cluster (includes task-level metrics)"
   type        = bool
   default     = true
 }

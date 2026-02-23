@@ -545,7 +545,7 @@ resource "aws_ecs_cluster" "keycloak" {
 
   setting {
     name  = "containerInsights"
-    value = var.ecs_container_insights_enabled ? "enabled" : "disabled"
+    value = var.ecs_container_insights_enabled ? "enhanced" : "disabled"
   }
 
   tags = merge(local.common_tags, {

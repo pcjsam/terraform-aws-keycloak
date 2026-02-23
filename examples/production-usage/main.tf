@@ -10,6 +10,7 @@
 # - 3+ Keycloak tasks with auto-scaling
 # - VPC Flow Logs enabled
 # - ALB access logs enabled
+# - Container Insights with enhanced observability (task-level metrics)
 # - Performance Insights enabled
 # - Bastion host for database access
 # - Extended log retention
@@ -39,6 +40,9 @@ module "keycloak" {
   # ALB Configuration
   alb_access_logs_enabled = true
   alb_idle_timeout        = 120
+
+  # ECS Configuration
+  ecs_container_insights_enabled = true # Enhanced observability with task-level metrics
 
   # Keycloak Task Configuration (production sizing)
   keycloak_image                            = var.keycloak_image
