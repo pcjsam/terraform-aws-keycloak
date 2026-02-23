@@ -22,7 +22,22 @@ terraform {
   # }
 }
 
+# Primary AWS provider - where infrastructure will be deployed
 provider "aws" {
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project   = var.project_name
+      ManagedBy = "terraform"
+    }
+  }
+}
+
+# DNS provider - same account in this example
+# For cross-account DNS, configure a separate provider with assume_role
+provider "aws" {
+  alias  = "dns"
   region = "us-east-1"
 
   default_tags {

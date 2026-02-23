@@ -18,6 +18,15 @@ variable "route53_zone_id" {
 }
 
 ############################################
+# Keycloak Configuration
+############################################
+
+variable "keycloak_image" {
+  description = "Docker image for Keycloak (should be your custom-built production image)"
+  type        = string
+}
+
+############################################
 # Optional Variables
 ############################################
 

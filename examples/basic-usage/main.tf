@@ -15,6 +15,12 @@
 module "keycloak" {
   source = "../../"
 
+  # Pass both providers to the module
+  providers = {
+    aws     = aws
+    aws.dns = aws.dns
+  }
+
   project_name    = var.project_name
   domain_name     = var.domain_name
   route53_zone_id = var.route53_zone_id
@@ -25,7 +31,7 @@ module "keycloak" {
   vpc_private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
 
   # Keycloak Configuration (minimal for dev)
-  keycloak_image         = "quay.io/keycloak/keycloak:26.0.6"
+  keycloak_image         = var.keycloak_image
   keycloak_task_cpu      = 1024 # 1 vCPU
   keycloak_task_memory   = 2048 # 2 GB
   keycloak_desired_count = 2

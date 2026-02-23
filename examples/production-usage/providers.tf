@@ -28,8 +28,44 @@ terraform {
   # }
 }
 
+############################################
+# Primary AWS Provider
+# This is where all infrastructure will be deployed
+############################################
+
 provider "aws" {
   region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = var.project_name
+      Environment = "production"
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
+############################################
+# DNS Provider (Cross-Account)
+# Configure this to manage Route53 records in a different account
+############################################
+
+# Option 1: Same account (DNS zone in same account as infrastructure)
+# provider "aws" {
+#   alias  = "dns"
+#   region = "us-east-1"
+# }
+
+# Option 2: Cross-account (DNS zone in a central/shared account)
+provider "aws" {
+  alias  = "dns"
+  region = "us-east-1"
+
+  # Assume a role in the DNS account to manage Route53 records
+  assume_role {
+    role_arn     = var.dns_account_role_arn
+    session_name = "keycloak-terraform"
+  }
 
   default_tags {
     tags = {

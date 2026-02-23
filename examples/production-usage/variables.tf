@@ -18,6 +18,15 @@ variable "route53_zone_id" {
 }
 
 ############################################
+# Cross-Account DNS Configuration
+############################################
+
+variable "dns_account_role_arn" {
+  description = "IAM role ARN in the DNS account to assume for Route53 operations. Example: arn:aws:iam::111111111111:role/Route53AccessRole"
+  type        = string
+}
+
+############################################
 # VPC Configuration
 ############################################
 
@@ -51,12 +60,6 @@ variable "keycloak_image" {
 
 variable "keycloak_cross_account_ecr_repository_arn" {
   description = "ECR repository ARN if using cross-account ECR. Leave empty for same-account ECR or public registry."
-  type        = string
-  default     = ""
-}
-
-variable "keycloak_features" {
-  description = "Keycloak features to enable (comma-separated)"
   type        = string
   default     = ""
 }

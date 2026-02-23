@@ -40,9 +40,7 @@ terraform plan
 terraform apply
 ```
 
-3. Wait for deployment to complete (5-10 minutes)
-
-4. Get admin credentials:
+3. Get admin credentials:
 
 ```bash
 aws secretsmanager get-secret-value \
@@ -51,21 +49,20 @@ aws secretsmanager get-secret-value \
   --output text | jq .
 ```
 
-5. Access Keycloak:
+4. Access Keycloak:
 
 ```bash
-open $(terraform output -raw keycloak_admin_console_url)
+open $(terraform output -raw keycloak_url)/admin
 ```
 
 ## Cost Estimate
 
-Approximate monthly cost: ~$100-120
+Approximate monthly cost: ~$80-100
 
 | Component | Configuration | Estimated Cost |
 |-----------|---------------|----------------|
-| ECS Fargate | 2 × 1 vCPU × 2GB | ~$60 |
+| ECS Fargate | 2 x 1 vCPU x 2GB | ~$60 |
 | RDS PostgreSQL | db.t3.micro, 20GB | ~$15 |
-| NAT Gateway | 1 gateway | ~$35 |
 | ALB | 1 ALB | ~$20 |
 
 ## Cleanup

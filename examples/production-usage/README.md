@@ -17,10 +17,11 @@ This example demonstrates a production-ready Keycloak deployment on AWS ECS Farg
                     ┌────────────────────────────────────────────────┐
                     │                Production VPC                   │
                     │                                                │
-   Internet ──────► │  ALB (3 AZs) ──► ECS Tasks (3 AZs)            │
+   Internet ──────► │  ALB (Public) ──► ECS Tasks (Public Subnets)  │
                     │                       │                        │
                     │                       ▼                        │
-                    │              RDS PostgreSQL (Multi-AZ)         │
+                    │              RDS PostgreSQL (Private Subnets)  │
+                    │                   (Multi-AZ)                   │
                     │                                                │
                     │  Bastion ──► (SSM Session Manager)             │
                     └────────────────────────────────────────────────┘
@@ -54,8 +55,8 @@ keycloak_image    = "quay.io/keycloak/keycloak:26.0.6"
 keycloak_features = ""
 
 # RDS Configuration
-rds_instance_class     = "db.r6g.large"
-rds_allocated_storage  = 100
+rds_instance_class        = "db.r6g.large"
+rds_allocated_storage     = 100
 rds_max_allocated_storage = 500
 
 # Bastion Access (your office/VPN CIDR)
@@ -78,7 +79,7 @@ terraform init
 # Review the plan
 terraform plan -out=tfplan
 
-# Apply (production deployments should use a review process)
+# Apply
 terraform apply tfplan
 ```
 
@@ -111,7 +112,7 @@ aws secretsmanager get-secret-value \
 ### 5. Access Admin Console
 
 ```bash
-open $(terraform output -raw keycloak_admin_console_url)
+open $(terraform output -raw keycloak_url)/admin
 ```
 
 ## Database Access
@@ -144,56 +145,18 @@ aws ssm start-session \
 psql -h localhost -U keycloak -d keycloak
 ```
 
-## Realm Configuration
-
-After deployment, use the Terraform Keycloak provider to manage realms:
-
-```hcl
-# Add to providers.tf
-provider "keycloak" {
-  client_id = "admin-cli"
-  username  = jsondecode(data.aws_secretsmanager_secret_version.admin.secret_string)["username"]
-  password  = jsondecode(data.aws_secretsmanager_secret_version.admin.secret_string)["password"]
-  url       = module.keycloak.keycloak_url
-}
-
-data "aws_secretsmanager_secret_version" "admin" {
-  secret_id = module.keycloak.keycloak_admin_secret_arn
-}
-
-# Create realm
-resource "keycloak_realm" "production" {
-  realm   = "production"
-  enabled = true
-
-  # Security settings
-  password_policy = "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1)"
-
-  security_defenses {
-    brute_force_detection {
-      permanent_lockout           = false
-      max_login_failures          = 5
-      wait_increment_seconds      = 60
-      minimum_quick_login_wait    = 60
-      max_failure_wait_seconds    = 900
-    }
-  }
-}
-```
-
 ## Cost Estimate
 
 Approximate monthly costs (us-east-1):
 
 | Component | Configuration | Estimated Cost |
 |-----------|---------------|----------------|
-| ECS Fargate | 3 × 2 vCPU × 4GB | ~$180 |
+| ECS Fargate | 3 x 2 vCPU x 4GB | ~$180 |
 | RDS PostgreSQL | db.r6g.large, Multi-AZ, 100GB | ~$300 |
-| NAT Gateway | 1 gateway + data transfer | ~$50 |
 | ALB | 1 ALB + access logs | ~$30 |
 | CloudWatch | Logs + Performance Insights | ~$40 |
 | Bastion | t3.micro | ~$10 |
-| **Total** | | **~$600/month** |
+| **Total** | | **~$560/month** |
 
 ## Security Checklist
 
@@ -203,10 +166,9 @@ Approximate monthly costs (us-east-1):
 - [ ] Multi-AZ RDS deployment
 - [ ] ALB access logs enabled
 - [ ] IMDSv2 required on bastion
-- [ ] Private subnets for ECS and RDS
 - [ ] Security groups with least privilege
 - [ ] Secrets in AWS Secrets Manager
-- [ ] Regular credential rotation planned
+- [ ] Admin password changed after initial deployment
 
 ## Maintenance
 
@@ -246,29 +208,3 @@ aws application-autoscaling register-scalable-target \
 2. Apply changes
 3. Create manual RDS snapshot
 4. Run `terraform destroy`
-
-## Troubleshooting
-
-### Tasks Not Starting
-
-Check CloudWatch logs and ECS task stopped reason:
-
-```bash
-aws logs tail $(terraform output -raw cloudwatch_log_group_name) --since 30m
-```
-
-### Cluster Not Forming
-
-Verify service discovery and JGroups communication:
-
-```bash
-# Check service discovery instances
-aws servicediscovery list-instances \
-  --service-id $(aws servicediscovery list-services --query 'Services[0].Id' --output text)
-```
-
-### Performance Issues
-
-1. Check Performance Insights in RDS console
-2. Review Container Insights metrics
-3. Consider scaling up task CPU/memory

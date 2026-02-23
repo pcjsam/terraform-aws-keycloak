@@ -136,21 +136,9 @@ variable "route53_zone_id" {
   type        = string
 }
 
-variable "create_dns_record" {
-  description = "Create Route53 A record pointing to ALB"
-  type        = bool
-  default     = true
-}
-
 ############################################
 # ECS Cluster Configuration
 ############################################
-
-variable "ecs_cluster_name" {
-  description = "Name of the ECS cluster (uses project_name if empty)"
-  type        = string
-  default     = ""
-}
 
 variable "ecs_container_insights_enabled" {
   description = "Enable CloudWatch Container Insights for ECS cluster"
@@ -282,18 +270,6 @@ variable "keycloak_hostname_strict" {
   default     = true
 }
 
-variable "keycloak_features" {
-  description = "Keycloak features to enable (comma-separated)"
-  type        = string
-  default     = ""
-}
-
-variable "keycloak_features_disabled" {
-  description = "Keycloak features to disable (comma-separated)"
-  type        = string
-  default     = ""
-}
-
 variable "keycloak_log_level" {
   description = "Keycloak log level"
   type        = string
@@ -303,18 +279,6 @@ variable "keycloak_log_level" {
     condition     = contains(["ALL", "DEBUG", "ERROR", "FATAL", "INFO", "OFF", "TRACE", "WARN"], var.keycloak_log_level)
     error_message = "Log level must be one of: ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE, WARN."
   }
-}
-
-variable "keycloak_metrics_enabled" {
-  description = "Enable Keycloak metrics endpoint"
-  type        = bool
-  default     = true
-}
-
-variable "keycloak_health_enabled" {
-  description = "Enable Keycloak health endpoints"
-  type        = bool
-  default     = true
 }
 
 variable "keycloak_additional_env_vars" {
@@ -333,27 +297,6 @@ variable "keycloak_additional_secrets" {
     valueFrom = string
   }))
   default = []
-}
-
-############################################
-# Keycloak Clustering Configuration
-############################################
-
-variable "keycloak_cache_stack" {
-  description = "Keycloak cache stack (tcp for JDBC_PING clustering)"
-  type        = string
-  default     = "jdbc-ping"
-
-  validation {
-    condition     = contains(["jdbc-ping", "s3-ping", "local"], var.keycloak_cache_stack)
-    error_message = "Cache stack must be one of: jdbc-ping, s3-ping, local."
-  }
-}
-
-variable "keycloak_s3_ping_bucket_name" {
-  description = "S3 bucket name for S3_PING cluster discovery (only used if cache_stack is s3-ping)"
-  type        = string
-  default     = ""
 }
 
 ############################################

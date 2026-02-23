@@ -18,6 +18,13 @@
 module "keycloak" {
   source = "../../"
 
+  # Pass providers to the module
+  # aws.dns is configured to assume a role in the DNS account
+  providers = {
+    aws     = aws
+    aws.dns = aws.dns
+  }
+
   project_name    = var.project_name
   domain_name     = var.domain_name
   route53_zone_id = var.route53_zone_id
@@ -49,9 +56,6 @@ module "keycloak" {
   # Keycloak Application Configuration
   keycloak_hostname_strict = true
   keycloak_log_level       = "INFO"
-  keycloak_metrics_enabled = true
-  keycloak_health_enabled  = true
-  keycloak_features        = var.keycloak_features
 
   # Health Check Configuration
   health_check_path                = "/health/ready"

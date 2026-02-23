@@ -7,11 +7,6 @@ output "keycloak_url" {
   value       = module.keycloak.keycloak_url
 }
 
-output "keycloak_admin_console_url" {
-  description = "URL for Keycloak admin console"
-  value       = module.keycloak.keycloak_admin_console_url
-}
-
 output "keycloak_admin_secret_arn" {
   description = "ARN of the Secrets Manager secret containing Keycloak admin credentials"
   value       = module.keycloak.keycloak_admin_secret_arn

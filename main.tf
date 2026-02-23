@@ -3,6 +3,7 @@
 ############################################
 
 data "aws_caller_identity" "current" {}
+
 data "aws_region" "current" {}
 
 data "aws_availability_zones" "available" {
@@ -18,14 +19,11 @@ data "aws_ssm_parameter" "bastion_ami" {
 
 locals {
   availability_zones = length(var.vpc_availability_zones) > 0 ? var.vpc_availability_zones : slice(data.aws_availability_zones.available.names, 0, 2)
-  ecs_cluster_name   = var.ecs_cluster_name != "" ? var.ecs_cluster_name : var.project_name
 
   alb_logs_bucket_name = var.alb_access_logs_bucket_name != "" ? var.alb_access_logs_bucket_name : "${var.project_name}-alb-logs-${data.aws_caller_identity.current.account_id}"
 
-  # Keycloak database connection string
   db_url = "jdbc:postgresql://${aws_db_instance.keycloak.endpoint}/${var.rds_database_name}"
 
-  # Common tags for all resources
   common_tags = merge(var.tags, {
     Project   = var.project_name
     ManagedBy = "terraform"
@@ -41,7 +39,7 @@ resource "aws_acm_certificate" "keycloak" {
   validation_method = "DNS"
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-cert"
+    Name = "${var.project_name}-cert"
   })
 
   lifecycle {
@@ -50,6 +48,8 @@ resource "aws_acm_certificate" "keycloak" {
 }
 
 resource "aws_route53_record" "cert_validation" {
+  provider = aws.dns
+
   for_each = {
     for dvo in aws_acm_certificate.keycloak.domain_validation_options : dvo.domain_name => {
       name   = dvo.resource_record_name
@@ -93,7 +93,6 @@ resource "aws_internet_gateway" "main" {
   })
 }
 
-# Public Subnets (for ALB and NAT Gateway)
 resource "aws_subnet" "public" {
   count = length(var.vpc_public_subnet_cidrs)
 
@@ -108,7 +107,6 @@ resource "aws_subnet" "public" {
   })
 }
 
-# Private Subnets (for ECS tasks and RDS)
 resource "aws_subnet" "private" {
   count = length(var.vpc_private_subnet_cidrs)
 
@@ -122,30 +120,6 @@ resource "aws_subnet" "private" {
   })
 }
 
-# Elastic IP for NAT Gateway
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-nat-eip"
-  })
-
-  depends_on = [aws_internet_gateway.main]
-}
-
-# NAT Gateway (for private subnet internet access)
-resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-nat"
-  })
-
-  depends_on = [aws_internet_gateway.main]
-}
-
-# Public Route Table
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -166,14 +140,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Private Route Table
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main.id
-  }
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-private-rt"
@@ -260,7 +228,6 @@ resource "aws_flow_log" "main" {
 # Security Groups
 ############################################
 
-# ALB Security Group
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "Security group for Keycloak ALB"
@@ -295,13 +262,11 @@ resource "aws_security_group" "alb" {
   })
 }
 
-# ECS Tasks Security Group
 resource "aws_security_group" "ecs_tasks" {
   name        = "${var.project_name}-ecs-tasks-sg"
   description = "Security group for Keycloak ECS tasks"
   vpc_id      = aws_vpc.main.id
 
-  # Allow traffic from ALB on Keycloak HTTP port
   ingress {
     description     = "HTTP from ALB"
     from_port       = var.keycloak_http_port
@@ -310,7 +275,6 @@ resource "aws_security_group" "ecs_tasks" {
     security_groups = [aws_security_group.alb.id]
   }
 
-  # Allow health check traffic from ALB
   ingress {
     description     = "Health check from ALB"
     from_port       = var.keycloak_health_port
@@ -319,7 +283,6 @@ resource "aws_security_group" "ecs_tasks" {
     security_groups = [aws_security_group.alb.id]
   }
 
-  # Allow JGroups traffic between ECS tasks (for clustering)
   ingress {
     description = "JGroups cluster communication"
     from_port   = var.keycloak_jgroups_port
@@ -328,7 +291,6 @@ resource "aws_security_group" "ecs_tasks" {
     self        = true
   }
 
-  # Allow all traffic between tasks (for Infinispan replication)
   ingress {
     description = "Infinispan replication"
     from_port   = 7900
@@ -350,7 +312,6 @@ resource "aws_security_group" "ecs_tasks" {
   })
 }
 
-# RDS Security Group
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds-sg"
   description = "Security group for Keycloak RDS"
@@ -388,7 +349,6 @@ resource "aws_security_group" "rds" {
   })
 }
 
-# Bastion Security Group
 resource "aws_security_group" "bastion" {
   count = var.bastion_enabled ? 1 : 0
 
@@ -495,9 +455,8 @@ resource "aws_lb" "keycloak" {
   })
 }
 
-# Target Group for Keycloak
 resource "aws_lb_target_group" "keycloak" {
-  name        = "${var.project_name}-keycloak-tg"
+  name        = "${var.project_name}-tg"
   port        = var.keycloak_http_port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
@@ -515,15 +474,13 @@ resource "aws_lb_target_group" "keycloak" {
     matcher             = "200"
   }
 
-  # Required for proper draining during deployments
   deregistration_delay = 30
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-tg"
+    Name = "${var.project_name}-tg"
   })
 }
 
-# HTTPS Listener
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.keycloak.arn
   port              = 443
@@ -541,7 +498,6 @@ resource "aws_lb_listener" "https" {
   })
 }
 
-# HTTP to HTTPS Redirect Listener
 resource "aws_lb_listener" "http_redirect" {
   load_balancer_arn = aws_lb.keycloak.arn
   port              = 80
@@ -567,7 +523,7 @@ resource "aws_lb_listener" "http_redirect" {
 ############################################
 
 resource "aws_route53_record" "keycloak" {
-  count = var.create_dns_record ? 1 : 0
+  provider = aws.dns
 
   zone_id = var.route53_zone_id
   name    = var.domain_name
@@ -585,7 +541,7 @@ resource "aws_route53_record" "keycloak" {
 ############################################
 
 resource "aws_ecs_cluster" "keycloak" {
-  name = local.ecs_cluster_name
+  name = var.project_name
 
   setting {
     name  = "containerInsights"
@@ -593,14 +549,14 @@ resource "aws_ecs_cluster" "keycloak" {
   }
 
   tags = merge(local.common_tags, {
-    Name = local.ecs_cluster_name
+    Name = var.project_name
   })
 }
 
 resource "aws_ecs_cluster_capacity_providers" "keycloak" {
   cluster_name = aws_ecs_cluster.keycloak.name
 
-  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+  capacity_providers = ["FARGATE"]
 
   default_capacity_provider_strategy {
     base              = 1
@@ -614,11 +570,11 @@ resource "aws_ecs_cluster_capacity_providers" "keycloak" {
 ############################################
 
 resource "aws_cloudwatch_log_group" "keycloak" {
-  name              = "/ecs/${var.project_name}/keycloak"
+  name              = "/ecs/${var.project_name}"
   retention_in_days = var.log_retention_days
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-logs"
+    Name = "${var.project_name}-logs"
   })
 }
 
@@ -635,10 +591,10 @@ resource "random_password" "keycloak_admin" {
 }
 
 resource "aws_secretsmanager_secret" "keycloak_admin" {
-  name = "${var.project_name}/keycloak/admin"
+  name = "${var.project_name}/admin"
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-admin-secret"
+    Name = "${var.project_name}-admin-secret"
   })
 }
 
@@ -648,6 +604,10 @@ resource "aws_secretsmanager_secret_version" "keycloak_admin" {
     username = var.keycloak_admin_username
     password = var.keycloak_admin_password != "" ? var.keycloak_admin_password : random_password.keycloak_admin[0].result
   })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 ############################################
@@ -655,7 +615,7 @@ resource "aws_secretsmanager_secret_version" "keycloak_admin" {
 ############################################
 
 resource "aws_iam_role" "ecs_task_execution" {
-  name = "${var.project_name}-keycloak-task-execution-role"
+  name = "${var.project_name}-task-execution-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -677,7 +637,7 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
 }
 
 resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
-  name = "${var.project_name}-keycloak-secrets-policy"
+  name = "${var.project_name}-secrets-policy"
   role = aws_iam_role.ecs_task_execution.id
 
   policy = jsonencode({
@@ -697,7 +657,6 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
   })
 }
 
-# Cross-account ECR pull permissions (if using ECR from another account)
 data "aws_iam_policy_document" "cross_account_ecr_pull" {
   count = var.keycloak_cross_account_ecr_repository_arn != "" ? 1 : 0
 
@@ -715,12 +674,12 @@ data "aws_iam_policy_document" "cross_account_ecr_pull" {
 resource "aws_iam_policy" "cross_account_ecr_pull" {
   count = var.keycloak_cross_account_ecr_repository_arn != "" ? 1 : 0
 
-  name        = "${var.project_name}-keycloak-ecs-execution-role-cross-account-ecr"
+  name        = "${var.project_name}-cross-account-ecr-policy"
   description = "Allows Keycloak ECS task execution role to pull images from cross-account ECR repository"
   policy      = data.aws_iam_policy_document.cross_account_ecr_pull[0].json
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-ecs-execution-role-cross-account-ecr"
+    Name = "${var.project_name}-cross-account-ecr-policy"
   })
 }
 
@@ -736,7 +695,7 @@ resource "aws_iam_role_policy_attachment" "cross_account_ecr_pull" {
 ############################################
 
 resource "aws_iam_role" "ecs_task" {
-  name = "${var.project_name}-keycloak-task-role"
+  name = "${var.project_name}-task-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -752,39 +711,12 @@ resource "aws_iam_role" "ecs_task" {
   tags = local.common_tags
 }
 
-# S3 access for S3_PING clustering (if enabled)
-resource "aws_iam_role_policy" "ecs_task_s3_ping" {
-  count = var.keycloak_cache_stack == "s3-ping" ? 1 : 0
-
-  name = "${var.project_name}-keycloak-s3-ping-policy"
-  role = aws_iam_role.ecs_task.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          "arn:aws:s3:::${var.keycloak_s3_ping_bucket_name}",
-          "arn:aws:s3:::${var.keycloak_s3_ping_bucket_name}/*"
-        ]
-      }
-    ]
-  })
-}
-
 ############################################
 # ECS Task Definition
 ############################################
 
 resource "aws_ecs_task_definition" "keycloak" {
-  family                   = "${var.project_name}-keycloak"
+  family                   = var.project_name
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.keycloak_task_cpu
@@ -815,16 +747,10 @@ resource "aws_ecs_task_definition" "keycloak" {
       ]
 
       environment = concat([
-        # Database configuration
-        {
-          name  = "KC_DB"
-          value = "postgres"
-        },
         {
           name  = "KC_DB_URL"
           value = local.db_url
         },
-        # Hostname configuration
         {
           name  = "KC_HOSTNAME"
           value = var.domain_name
@@ -833,7 +759,6 @@ resource "aws_ecs_task_definition" "keycloak" {
           name  = "KC_HOSTNAME_STRICT"
           value = tostring(var.keycloak_hostname_strict)
         },
-        # Proxy configuration (behind ALB)
         {
           name  = "KC_PROXY_HEADERS"
           value = "xforwarded"
@@ -842,40 +767,15 @@ resource "aws_ecs_task_definition" "keycloak" {
           name  = "KC_HTTP_ENABLED"
           value = "true"
         },
-        # Health and metrics
-        {
-          name  = "KC_HEALTH_ENABLED"
-          value = tostring(var.keycloak_health_enabled)
-        },
-        {
-          name  = "KC_METRICS_ENABLED"
-          value = tostring(var.keycloak_metrics_enabled)
-        },
-        # Logging
         {
           name  = "KC_LOG_LEVEL"
           value = var.keycloak_log_level
         },
-        # Clustering - JDBC_PING for ECS
-        {
-          name  = "KC_CACHE"
-          value = "ispn"
-        },
-        {
-          name  = "KC_CACHE_STACK"
-          value = "tcp"
-        },
         {
           name  = "JAVA_OPTS_APPEND"
-          value = "-Djgroups.dns.query=${var.project_name}-keycloak.${var.project_name}.local -Djgroups.bind.address=SITE_LOCAL"
+          value = "-Djgroups.dns.query=${var.project_name}.${var.project_name}.local -Djgroups.bind.address=SITE_LOCAL"
         }
-        ], var.keycloak_features != "" ? [{
-          name  = "KC_FEATURES"
-          value = var.keycloak_features
-          }] : [], var.keycloak_features_disabled != "" ? [{
-          name  = "KC_FEATURES_DISABLED"
-          value = var.keycloak_features_disabled
-      }] : [], var.keycloak_additional_env_vars)
+      ], var.keycloak_additional_env_vars)
 
       secrets = concat([
         {
@@ -916,7 +816,7 @@ resource "aws_ecs_task_definition" "keycloak" {
   ])
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-task"
+    Name = "${var.project_name}-task"
   })
 }
 
@@ -935,7 +835,7 @@ resource "aws_service_discovery_private_dns_namespace" "keycloak" {
 }
 
 resource "aws_service_discovery_service" "keycloak" {
-  name = "${var.project_name}-keycloak"
+  name = var.project_name
 
   dns_config {
     namespace_id = aws_service_discovery_private_dns_namespace.keycloak.id
@@ -960,16 +860,16 @@ resource "aws_service_discovery_service" "keycloak" {
 ############################################
 
 resource "aws_ecs_service" "keycloak" {
-  name            = "${var.project_name}-keycloak"
+  name            = var.project_name
   cluster         = aws_ecs_cluster.keycloak.id
   task_definition = aws_ecs_task_definition.keycloak.arn
   desired_count   = var.keycloak_desired_count
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
   load_balancer {
@@ -982,11 +882,9 @@ resource "aws_ecs_service" "keycloak" {
     registry_arn = aws_service_discovery_service.keycloak.arn
   }
 
-  # Deployment configuration for rolling updates
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
 
-  # Deployment circuit breaker for automatic rollback on failures
   deployment_circuit_breaker {
     enable   = true
     rollback = true
@@ -998,7 +896,7 @@ resource "aws_ecs_service" "keycloak" {
   ]
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-service"
+    Name = "${var.project_name}-service"
   })
 }
 
@@ -1017,7 +915,7 @@ resource "aws_appautoscaling_target" "keycloak" {
 }
 
 resource "aws_appautoscaling_policy" "keycloak_cpu" {
-  name               = "${var.project_name}-keycloak-cpu-scaling"
+  name               = "${var.project_name}-cpu-scaling"
   policy_type        = "TargetTrackingScaling"
   resource_id        = aws_appautoscaling_target.keycloak.resource_id
   scalable_dimension = aws_appautoscaling_target.keycloak.scalable_dimension
@@ -1034,7 +932,7 @@ resource "aws_appautoscaling_policy" "keycloak_cpu" {
 }
 
 resource "aws_appautoscaling_policy" "keycloak_memory" {
-  name               = "${var.project_name}-keycloak-memory-scaling"
+  name               = "${var.project_name}-memory-scaling"
   policy_type        = "TargetTrackingScaling"
   resource_id        = aws_appautoscaling_target.keycloak.resource_id
   scalable_dimension = aws_appautoscaling_target.keycloak.scalable_dimension
@@ -1055,16 +953,16 @@ resource "aws_appautoscaling_policy" "keycloak_memory" {
 ############################################
 
 resource "aws_db_subnet_group" "keycloak" {
-  name       = "${var.project_name}-keycloak-db-subnet-group"
+  name       = "${var.project_name}-db-subnet-group"
   subnet_ids = aws_subnet.private[*].id
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-db-subnet-group"
+    Name = "${var.project_name}-db-subnet-group"
   })
 }
 
 resource "aws_db_instance" "keycloak" {
-  identifier = "${var.project_name}-keycloak-db"
+  identifier = "${var.project_name}-db"
 
   # Engine configuration
   engine                = "postgres"
@@ -1102,13 +1000,13 @@ resource "aws_db_instance" "keycloak" {
   # Protection
   deletion_protection       = var.rds_deletion_protection
   skip_final_snapshot       = var.rds_skip_final_snapshot
-  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : "${var.project_name}-keycloak-db-final-snapshot"
+  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : "${var.project_name}-db-final-snapshot"
 
   # Enable IAM authentication
   iam_database_authentication_enabled = true
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-keycloak-db"
+    Name = "${var.project_name}-db"
   })
 }
 
