@@ -158,7 +158,7 @@ Before using this module, ensure you have:
 
 | Variable                           | Description                                | Default         |
 | ---------------------------------- | ------------------------------------------ | --------------- |
-| `rds_engine_version`               | PostgreSQL engine version                  | `"16.4"`        |
+| `rds_engine_version`               | PostgreSQL engine version                  | `"16"`          |
 | `rds_instance_class`               | RDS instance class                         | `"db.t3.micro"` |
 | `rds_allocated_storage`            | Allocated storage in GB                    | `20`            |
 | `rds_max_allocated_storage`        | Max storage for autoscaling (0 to disable) | `100`           |

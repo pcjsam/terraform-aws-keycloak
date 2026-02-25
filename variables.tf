@@ -377,7 +377,7 @@ variable "health_check_start_period" {
 variable "rds_engine_version" {
   description = "PostgreSQL engine version"
   type        = string
-  default     = "16.4"
+  default     = "16"
 }
 
 variable "rds_instance_class" {
